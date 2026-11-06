@@ -294,6 +294,16 @@ table.grid-edit td:first-child{font-weight:700}
       <div class="actions" style="margin-top:14px"><button class="btn primary" type="button" id="g-save">Enregistrer les tarifs</button></div>
     </div>
     <div class="panel">
+      <h2>Chauffeurs</h2>
+      <p class="hint">Le carnet des chauffeurs. Au moment d'attribuer une course, tape le prénom : le numéro se remplit tout seul et la course part en privé sur son WhatsApp.</p>
+      <div class="members" id="drivers" style="margin:10px 0"></div>
+      <form id="d-f" class="row three">
+        <label for="d-prenom">Prénom<input id="d-prenom" required></label>
+        <label for="d-tel">Téléphone WhatsApp<input id="d-tel" type="tel" inputmode="tel" placeholder="06 12 34 56 78" required></label>
+        <div style="align-self:end"><button class="btn" type="submit">Ajouter le chauffeur</button></div>
+      </form>
+    </div>
+    <div class="panel">
       <h2>Équipe</h2>
       <p class="hint">Seules ces adresses peuvent ouvrir le poste. Ajoute l'e-mail d'un collègue, puis il crée son compte avec cette adresse.</p>
       <div class="members" id="members" style="margin:10px 0"></div>
@@ -310,6 +320,7 @@ table.grid-edit td:first-child{font-weight:700}
     </div>
   </section>
 </main>
+<datalist id="dl-chauffeurs"></datalist>
 <div class="toast" id="toast" hidden></div>
 
 <script>
@@ -338,7 +349,7 @@ if(!window.supabase){
 }
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 let cfg = JSON.parse(JSON.stringify(DEF));
-let courses = [], membres = [], me = {email:"", nom:""};
+let courses = [], membres = [], chauffeurs = [], me = {email:"", nom:""};
 let tab = "immediat", catTouched = false, lastSaved = null;
 let googleKey = "", mapsReady = false, mapsLoading = null;
 let dep = {txt:"", loc:null}, arr = {txt:"", loc:null};
@@ -398,6 +409,30 @@ function waText(c){
   return L.join("\n");
 }
 const waLink = c => "https://api.whatsapp.com/send?text="+encodeURIComponent(waText(c));
+function telIntl(t){
+  let d = String(t||"").replace(/[^\d+]/g,"");
+  if(d.startsWith("+")) d = d.slice(1);
+  else if(d.startsWith("00")) d = d.slice(2);
+  else if(d.startsWith("0")) d = "33"+d.slice(1);
+  return d.replace(/\D/g,"");
+}
+function waTextChauffeur(c){
+  const d=new Date(c.type==="resa"?c.quand:(c.cree_le||Date.now()));
+  const num = pad(d.getDate())+pad(d.getMonth()+1)+"-"+String(c.id||"").replace(/-/g,"").slice(0,4).toUpperCase();
+  const L=["🧾 *BON DE COMMANDE N° "+num+"*","*Allo Taxi Centrale*","",
+    "✅ Course confiée à *"+(c.chauffeur||"")+"*"];
+  if(c.type==="resa") L.push("📅 Prise en charge : *"+d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})+" à "+hhmm(c.quand)+"*");
+  else L.push("🚕 Prise en charge *immédiate* ("+d.toLocaleDateString("fr-FR")+")"+(c.approche?" · approche annoncée "+c.approche+" min":""));
+  L.push("","📍 *DÉPART*",c.depart,"","🏁 *ARRIVÉE*",c.arrivee,"");
+  L.push("👤 *CLIENT* : "+(c.client||"—"));
+  if(c.tel) L.push("📞 *"+c.tel+"*");
+  L.push("","🛣️ "+kmTxt(c.km)+" km"+(c.duree?"   ⏱️ "+c.duree+" min":""),"🚘 "+c.categorie+"   👥 "+c.passagers+" pers.");
+  if(c.note) L.push("","📝 "+c.note);
+  L.push("","💶 *TARIF : "+eur(c.prix)+"*","💼 Commission : "+eur(c.commission),"","Merci d'appeler le client à ton arrivée 👍");
+  return L.join("\n");
+}
+const waLinkChauffeur = c => "https://api.whatsapp.com/send?phone="+telIntl(c.chauffeur_tel)+"&text="+encodeURIComponent(waTextChauffeur(c));
+const findChauffeur = n => chauffeurs.find(d=>d.prenom.trim().toLowerCase()===String(n||"").trim().toLowerCase());
 const mapsLink = (a,b) => "https://www.google.com/maps/dir/?api=1&travelmode=driving&origin="+encodeURIComponent(a||"")+"&destination="+encodeURIComponent(b||"");
 function calLink(c){
   const s=new Date(c.quand), e=new Date(c.quand+Math.max(c.duree||30,15)*60000);
@@ -566,6 +601,11 @@ async function loadConfig(){
   }
   fillCats(); renderGrid(); $("#k-google").value = googleKey; updateMeter();
 }
+async function loadChauffeurs(){
+  const {data}=await sb.from("chauffeurs").select("*").order("prenom"); chauffeurs=data||[];
+  $("#dl-chauffeurs").innerHTML = chauffeurs.map(d=>`<option value="${esc(d.prenom)}">${esc(d.tel)}</option>`).join("");
+  $("#drivers").innerHTML = chauffeurs.length ? chauffeurs.map(d=>`<div class="member"><span><b>${esc(d.prenom)}</b> · ${esc(d.tel||"pas de numéro")}</span><button class="btn sm ghost danger" type="button" data-del-driver="${d.id}">Retirer</button></div>`).join("") : `<p class="hint">Aucun chauffeur enregistré pour l'instant.</p>`;
+}
 async function loadMembres(){ const {data}=await sb.from("membres").select("*").order("nom"); membres=data||[]; renderMembres(); }
 async function upd(id, patch){
   const c=courses.find(x=>x.id===id); if(c){ Object.assign(c,patch); render(); }
@@ -585,6 +625,7 @@ function subscribe(){
     })
     .on("postgres_changes",{event:"*",schema:"public",table:"config"}, ()=>loadConfig())
     .on("postgres_changes",{event:"*",schema:"public",table:"membres"}, ()=>loadMembres())
+    .on("postgres_changes",{event:"*",schema:"public",table:"chauffeurs"}, ()=>loadChauffeurs())
     .subscribe(st=>{
       if(st==="SUBSCRIBED") status("En direct · synchronisé avec l'équipe");
       else if(st==="CHANNEL_ERROR"||st==="TIMED_OUT") status("Connexion temps réel coupée : les nouvelles courses s'afficheront au rechargement.", true);
@@ -602,9 +643,18 @@ document.addEventListener("click", async e=>{
   if(act==="copytel"&&c){ copy(c.tel); return; }
   if(act==="assign"){
     const card=el.closest(".card"), ch=card.querySelector(".a-ch").value.trim(), ap=card.querySelector(".a-ap").value.trim();
-    if(!ch){ toast("Indique le nom du chauffeur."); return; }
-    upd(id,{statut:"attribuee",chauffeur:ch,approche:ap}); return;
+    let tel=card.querySelector(".a-tel").value.trim();
+    if(!ch){ toast("Indique le prénom du chauffeur."); return; }
+    const known=findChauffeur(ch); if(!tel && known) tel=known.tel;
+    const patch={statut:"attribuee",chauffeur:known?known.prenom:ch,approche:ap,chauffeur_tel:tel,attribue_par:me.nom||""};
+    if(tel){ patch.envoye_chauffeur_le=new Date().toISOString(); window.open(waLinkChauffeur(Object.assign({},c,patch)),"_blank","noopener"); }
+    upd(id,patch);
+    if(!known && tel){ sb.from("chauffeurs").insert({prenom:ch,tel}).then(({error})=>{ if(!error){ loadChauffeurs(); toast(ch+" ajouté au carnet des chauffeurs."); } }); }
+    if(!tel) toast("Course attribuée. Ajoute le numéro du chauffeur pour lui envoyer en privé.");
+    return;
   }
+  if(act==="sendDriver"&&c){ upd(id,{envoye_chauffeur_le:new Date().toISOString()}); return; }
+  if(act==="unassign"){ upd(id,{statut:"partagee",chauffeur:"",chauffeur_tel:"",approche:"",envoye_chauffeur_le:null}); return; }
   if(act==="done") upd(id,{statut:"terminee"});
   if(act==="cancel") upd(id,{statut:"annulee"});
   if(act==="reopen") upd(id,{statut:c&&c.chauffeur?"attribuee":"attente"});
@@ -636,8 +686,11 @@ function card(c){
       <span>${esc(c.categorie)} · <b>${esc(c.passagers)}</b> pers.</span><span>Tarif <b>${eur(c.prix)}</b></span><span>Commission <b>${eur(c.commission)}</b></span></div>
     ${(c.client||c.tel)?`<div class="client"><span>${esc(c.client||"Client")}</span>${c.tel?`<a class="tel" href="tel:${esc(c.tel.replace(/\s/g,""))}">${esc(c.tel)}</a><button class="btn sm ghost" data-act="copytel" data-id="${c.id}">Copier</button>`:""}</div>`:""}
     ${c.note?`<div class="note">${esc(c.note)}</div>`:""}
-    ${c.chauffeur?`<div class="meta"><span>Chauffeur <b>${esc(c.chauffeur)}</b></span>${c.approche?`<span>Approche <b>${esc(c.approche)} min</b></span>`:""}</div>`:""}
-    ${open&&c.statut!=="attribuee"?`<div class="assign"><input class="a-ch" id="a-ch-${c.id}" placeholder="Chauffeur retenu" aria-label="Chauffeur retenu"><input class="a-ap mini" id="a-ap-${c.id}" type="number" min="0" placeholder="Appr. min" aria-label="Délai d'approche en minutes"><button class="btn sm" data-act="assign" data-id="${c.id}">Attribuer</button></div>`:""}
+    ${c.chauffeur?`<div class="client" style="background:var(--warn-soft)"><span>🚘 Chauffeur <b>${esc(c.chauffeur)}</b></span>${c.chauffeur_tel?`<span class="tel">${esc(c.chauffeur_tel)}</span>`:""}${c.approche?`<span>approche <b>${esc(c.approche)} min</b></span>`:""}
+      ${c.envoye_chauffeur_le?`<span class="byline">✓ envoyée en privé à ${hhmm(Date.parse(c.envoye_chauffeur_le))}${c.attribue_par?" par "+esc(c.attribue_par):""}</span>`:""}
+      ${open&&c.chauffeur_tel?`<a class="btn sm wa" data-act="sendDriver" data-id="${c.id}" href="${waLinkChauffeur(c)}" target="_blank" rel="noopener">${c.envoye_chauffeur_le?"Renvoyer":"Envoyer"} au chauffeur</a>`:""}
+      ${open?`<button class="btn sm ghost" data-act="unassign" data-id="${c.id}">Changer</button>`:""}</div>`:""}
+    ${open&&c.statut!=="attribuee"?`<div class="assign"><input class="a-ch" id="a-ch-${c.id}" list="dl-chauffeurs" placeholder="Prénom du chauffeur" aria-label="Prénom du chauffeur" autocomplete="off"><input class="a-tel" id="a-tel-${c.id}" type="tel" inputmode="tel" placeholder="Tél. chauffeur" aria-label="Téléphone du chauffeur"><input class="a-ap mini" id="a-ap-${c.id}" type="number" min="0" placeholder="Appr. min" aria-label="Délai d'approche en minutes"><button class="btn sm wa" data-act="assign" data-id="${c.id}">Attribuer + WhatsApp</button></div>`:""}
     <div class="actions">
       ${open?`<a class="btn sm wa" data-act="wa" data-id="${c.id}" href="${waLink(c)}" target="_blank" rel="noopener">WhatsApp</a>`:""}
       <button class="btn sm" data-act="copy" data-id="${c.id}">Copier</button>
@@ -764,6 +817,24 @@ $("#k-save").addEventListener("click", async ()=>{
 function renderMembres(){
   $("#members").innerHTML = membres.map(m=>`<div class="member"><span><b>${esc(m.nom||"—")}</b> · ${esc(m.email)}</span>${m.email.toLowerCase()===me.email.toLowerCase()?`<span class="byline">toi</span>`:`<button class="btn sm ghost danger" data-del-membre="${esc(m.email)}">Retirer</button>`}</div>`).join("");
 }
+$("#d-f").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const prenom=$("#d-prenom").value.trim(), tel=$("#d-tel").value.trim();
+  if(findChauffeur(prenom)){ toast("Ce prénom existe déjà dans le carnet."); return; }
+  const {error}=await sb.from("chauffeurs").insert({prenom,tel});
+  if(error) toast("Ajout impossible : "+error.message); else { $("#d-f").reset(); loadChauffeurs(); toast(prenom+" ajouté au carnet."); }
+});
+document.addEventListener("click", async e=>{
+  const b=e.target.closest("[data-del-driver]"); if(!b) return;
+  if(b.dataset.confirm!=="1"){ b.dataset.confirm="1"; b.textContent="Confirmer"; setTimeout(()=>{ b.dataset.confirm=""; b.textContent="Retirer"; },4000); return; }
+  const {error}=await sb.from("chauffeurs").delete().eq("id",b.dataset.delDriver);
+  if(error) toast("Retrait impossible."); else loadChauffeurs();
+});
+document.addEventListener("input", e=>{
+  if(!e.target.classList.contains("a-ch")) return;
+  const d=findChauffeur(e.target.value), tel=e.target.closest(".assign").querySelector(".a-tel");
+  if(d && tel && !tel.value) tel.value=d.tel;
+});
 $("#m-f").addEventListener("submit", async e=>{
   e.preventDefault();
   const {error}=await sb.from("membres").insert({email:$("#m-email").value.trim().toLowerCase(), nom:$("#m-nom").value.trim()});
@@ -820,7 +891,7 @@ async function boot(session){
   if(googleKey){ try{ await loadMaps(googleKey); buildAutocomplete(); $("#k-state").textContent="Clé active : autocomplétion et calcul automatique en service."; }catch(e){ useTextInputs(); setRouteState("Google Maps ne répond pas : saisis les km à la main.","err"); } }
   else { useTextInputs(); setRouteState("Calcul automatique inactif : ajoute la clé Google Maps dans Réglages.","err"); }
   updateMeter();
-  await Promise.all([loadCourses(), loadMembres()]);
+  await Promise.all([loadCourses(), loadMembres(), loadChauffeurs()]);
   subscribe();
 }
 sb.auth.getSession().then(({data})=>boot(data.session));
