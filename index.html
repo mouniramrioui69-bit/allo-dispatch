@@ -180,6 +180,7 @@ table.grid-edit td:first-child{font-weight:700}
         <button class="btn" type="button" id="l-signup">Créer mon compte</button>
       </div>
       <p class="hint" id="l-msg"></p>
+      <p class="hint">Mot de passe oublié ? Demande à Mounir de le réinitialiser.</p>
     </form>
   </div>
 </section>
@@ -311,6 +312,14 @@ table.grid-edit td:first-child{font-weight:700}
         <label for="m-email">E-mail<input id="m-email" type="email" required></label>
         <label for="m-nom">Prénom<input id="m-nom" required></label>
         <div><button class="btn" type="submit">Ajouter à l'équipe</button></div>
+      </form>
+    </div>
+    <div class="panel">
+      <h2>Mon mot de passe</h2>
+      <p class="hint">Choisis un nouveau mot de passe pour ton compte (6 caractères minimum).</p>
+      <form id="pw-f" class="row" style="margin-top:10px">
+        <label for="pw-new">Nouveau mot de passe<input id="pw-new" type="password" autocomplete="new-password" minlength="6" required></label>
+        <div style="align-self:end"><button class="btn" type="submit">Changer mon mot de passe</button></div>
       </form>
     </div>
     <div class="panel">
@@ -835,6 +844,11 @@ document.addEventListener("input", e=>{
   const d=findChauffeur(e.target.value), tel=e.target.closest(".assign").querySelector(".a-tel");
   if(d && tel && !tel.value) tel.value=d.tel;
 });
+$("#pw-f").addEventListener("submit", async e=>{
+  e.preventDefault();
+  const {error}=await sb.auth.updateUser({password:$("#pw-new").value});
+  if(error) toast("Changement impossible : "+error.message); else { $("#pw-f").reset(); toast("Mot de passe changé."); }
+});
 $("#m-f").addEventListener("submit", async e=>{
   e.preventDefault();
   const {error}=await sb.from("membres").insert({email:$("#m-email").value.trim().toLowerCase(), nom:$("#m-nom").value.trim()});
@@ -855,12 +869,12 @@ document.querySelectorAll("nav.tabs button").forEach(b=>b.addEventListener("clic
 $("#login-f").addEventListener("submit", async e=>{
   e.preventDefault(); $("#l-msg").textContent="Connexion…";
   let error;
-  try{ ({error}=await sb.auth.signInWithPassword({email:$("#l-email").value.trim(), password:$("#l-pass").value})); }
+  try{ ({error}=await sb.auth.signInWithPassword({email:$("#l-email").value.trim().toLowerCase(), password:$("#l-pass").value})); }
   catch(err){ $("#l-msg").textContent="Connexion au serveur impossible. Ouvre le fichier avec Chrome ou Edge, connecté à Internet."; return; }
   $("#l-msg").textContent = error ? (error.message.includes("Email not confirmed") ? "Confirme d'abord ton adresse avec le lien reçu par e-mail." : "E-mail ou mot de passe incorrect.") : "";
 });
 $("#l-signup").addEventListener("click", async ()=>{
-  const email=$("#l-email").value.trim(), password=$("#l-pass").value;
+  const email=$("#l-email").value.trim().toLowerCase(), password=$("#l-pass").value;
   if(!email||password.length<6){ $("#l-msg").textContent="Indique ton e-mail et un mot de passe d'au moins 6 caractères."; return; }
   $("#l-msg").textContent="Création du compte…";
   let data,error;
