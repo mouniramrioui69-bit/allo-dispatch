@@ -419,7 +419,7 @@ function telIntl(t){
 function waTextChauffeur(c){
   const d=new Date(c.type==="resa"?c.quand:(c.cree_le||Date.now()));
   const num = pad(d.getDate())+pad(d.getMonth()+1)+"-"+String(c.id||"").replace(/-/g,"").slice(0,4).toUpperCase();
-  const L=["🧾 *BON DE COMMANDE N° "+num+"*","*Allo Taxi Centrale*","",
+  const L=["🧾 *BON DE COMMANDE N° "+num+"*","*Transfert & Trajet*","",
     "✅ Course confiée à *"+(c.chauffeur||"")+"*"];
   if(c.type==="resa") L.push("📅 Prise en charge : *"+d.toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})+" à "+hhmm(c.quand)+"*");
   else L.push("🚕 Prise en charge *immédiate* ("+d.toLocaleDateString("fr-FR")+")"+(c.approche?" · approche annoncée "+c.approche+" min":""));
