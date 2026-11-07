@@ -111,6 +111,7 @@ input:focus,select:focus,textarea:focus,button:focus-visible,a:focus-visible{out
 .st-attribuee{background:var(--warn-soft);color:var(--warn)}
 .st-terminee{background:var(--ok-soft);color:var(--ok)}
 .st-annulee{background:var(--bad-soft);color:var(--bad)}
+.st-expiree{background:var(--soft);color:var(--bad)}
 .route{display:grid;gap:3px;min-width:0}
 .route div{display:flex;gap:8px;align-items:baseline;min-width:0;overflow-wrap:anywhere}
 .route i{flex:none;width:9px;height:9px;border-radius:50%;transform:translateY(1px)}
@@ -279,7 +280,7 @@ table.grid-edit td:first-child{font-weight:700}
       <label for="h-mois">Mois<input id="h-mois" type="month"></label>
       <label for="h-jour">Jour précis<input id="h-jour" type="date"></label>
       <label for="h-type">Type<select id="h-type"><option value="">Tous</option><option value="immediat">Immédiat</option><option value="resa">Réservation</option></select></label>
-      <label for="h-statut">Statut<select id="h-statut"><option value="">Tous</option><option value="attente">En attente</option><option value="partagee">Partagée</option><option value="attribuee">Attribuée</option><option value="terminee">Terminée</option><option value="annulee">Annulée</option></select></label>
+      <label for="h-statut">Statut<select id="h-statut"><option value="">Tous</option><option value="attente">En attente</option><option value="partagee">Partagée</option><option value="attribuee">Attribuée</option><option value="terminee">Terminée</option><option value="annulee">Annulée</option><option value="expiree">Non attribuée</option></select></label>
       <label for="h-q">Recherche<input id="h-q" placeholder="Client, adresse, chauffeur"></label>
     </div>
     <div class="totals" id="totals"></div>
@@ -365,7 +366,7 @@ const DEF = { grille: {
     {max:90,    val:20, mode:"eur"},
     {max:null,  val:22, mode:"pct"} ] };
 const CATS = ["Berline","XL","Van"];
-const STATUTS = {attente:"En attente",partagee:"Partagée",attribuee:"Attribuée",terminee:"Terminée",annulee:"Annulée"};
+const STATUTS = {attente:"En attente",partagee:"Partagée",attribuee:"Attribuée",terminee:"Terminée",annulee:"Annulée",expiree:"Non attribuée"};
 
 if(!window.supabase){
   document.getElementById("view-login").hidden=false;
@@ -714,7 +715,7 @@ document.addEventListener("click", async e=>{
   if(act==="unassign"){ upd(id,{statut:"partagee",chauffeur:"",chauffeur_tel:"",approche:"",envoye_chauffeur_le:null}); return; }
   if(act==="done") upd(id,{statut:"terminee"});
   if(act==="cancel") upd(id,{statut:"annulee"});
-  if(act==="reopen") upd(id,{statut:c&&c.chauffeur?"attribuee":"attente"});
+  if(act==="reopen"){ upd(id,{statut:c&&c.chauffeur?"attribuee":"attente",cloture_auto:false}); toast("Course rouverte : elle revient dans sa colonne."); }
   if(act==="del"){
     if(!pendingDelete.has(id)){ pendingDelete.add(id); render(); setTimeout(()=>{pendingDelete.delete(id);render();},4000); return; }
     pendingDelete.delete(id);
@@ -724,7 +725,7 @@ document.addEventListener("click", async e=>{
 });
 
 /* ===== Rendu ===== */
-const isOpen = c => c.statut!=="terminee" && c.statut!=="annulee";
+const isOpen = c => !["terminee","annulee","expiree"].includes(c.statut);
 function card(c){
   const diff=c.quand-Date.now(), open=isOpen(c);
   let cls="card";
@@ -761,7 +762,7 @@ function card(c){
 }
 function render(){
   const today=dayKey(Date.now());
-  const imm=courses.filter(c=>c.type==="immediat"&&(isOpen(c)||dayKey(c.cree_le)===today)).sort((a,b)=>isOpen(a)!==isOpen(b)?(isOpen(a)?-1:1):b.cree_le-a.cree_le);
+  const imm=courses.filter(c=>c.type==="immediat"&&isOpen(c)).sort((a,b)=>b.cree_le-a.cree_le);
   const resa=courses.filter(c=>c.type==="resa"&&isOpen(c)).sort((a,b)=>a.quand-b.quand);
   $("#c-imm").textContent=imm.filter(isOpen).length; $("#c-resa").textContent=resa.length;
   document.querySelectorAll("nav.tabs button").forEach(b=>b.setAttribute("aria-selected", b.dataset.tab===tab));
@@ -772,12 +773,12 @@ function render(){
     $("#form-title").textContent=isR?"Nouvelle réservation":"Nouvelle course immédiate";
     $("#f-save").textContent=isR?"Enregistrer la réservation":"Enregistrer la course";
     $("#f-when-row").hidden=!isR;
-    $("#list-title").textContent=isR?"Réservations à venir":"Courses du jour";
+    $("#list-title").textContent=isR?"Réservations à venir":"Courses en cours";
     const keep={}; document.querySelectorAll(".assign input").forEach(i=>{ if(i.value) keep[i.id]=i.value; });
     const items=isR?resa:imm;
     if(!items.length) $("#list").innerHTML = isR
       ? `<div class="empty"><b>Aucune réservation à venir</b>Les réservations de l'équipe apparaissent ici, triées par heure, avec une alerte 30 min avant le départ.</div>`
-      : `<div class="empty"><b>Aucune course aujourd'hui</b>Saisis l'appel à gauche : la course apparaît ici en direct chez vous trois.</div>`;
+      : `<div class="empty"><b>Aucune course en cours</b>Saisis l'appel à gauche : la course apparaît ici en direct chez vous trois. Les courses terminées sont dans Historique.</div>`;
     else if(isR){ let h="",last=""; for(const c of items){ const k=dayKey(c.quand); if(k!==last){ h+=`<h3>${esc(fmtDay(k))}</h3>`; last=k; } h+=card(c); } $("#list").innerHTML=h; }
     else $("#list").innerHTML=items.map(card).join("");
     for(const id in keep){ const i=document.getElementById(id); if(i) i.value=keep[id]; }
@@ -800,8 +801,8 @@ function renderHist(){
   for(const k of Object.keys(groups).sort().reverse()){
     const g=groups[k], gd=g.filter(c=>c.statut==="terminee");
     h+=`<div class="day-h"><span>${esc(fmtDay(k))}</span><em>${g.length} course${g.length>1?"s":""} · ${eur(sum(gd,"prix"))} · commissions ${eur(sum(gd,"commission"))}</em></div>
-    <div class="tbl-wrap"><table class="hist"><thead><tr><th>Heure</th><th>Type</th><th>Trajet</th><th>Client</th><th>Chauffeur</th><th>Statut</th><th style="text-align:right">Tarif</th><th style="text-align:right">Comm.</th></tr></thead><tbody>
-    ${g.map(c=>`<tr><td>${hhmm(c.quand)}</td><td>${c.type==="resa"?"Résa":"Imm."}</td><td>${esc(c.depart)} → ${esc(c.arrivee)}<br><span class="byline">${esc(kmTxt(c.km))} km · ${esc(c.categorie)} · ${esc(c.passagers)} pers.${c.cree_par_nom?" · saisie "+esc(c.cree_par_nom):""}</span></td><td>${esc(c.client||"—")}<br><span class="byline">${esc(c.tel||"")}</span></td><td>${esc(c.chauffeur||"—")}</td><td><span class="pill st-${esc(c.statut)}" style="margin:0">${esc(STATUTS[c.statut]||c.statut)}</span></td><td class="num">${eur(c.prix)}</td><td class="num">${eur(c.commission)}</td></tr>`).join("")}
+    <div class="tbl-wrap"><table class="hist"><thead><tr><th>Heure</th><th>Type</th><th>Trajet</th><th>Client</th><th>Chauffeur</th><th>Statut</th><th style="text-align:right">Tarif</th><th style="text-align:right">Comm.</th><th></th></tr></thead><tbody>
+    ${g.map(c=>`<tr><td>${hhmm(c.quand)}</td><td>${c.type==="resa"?"Résa":"Imm."}</td><td>${esc(c.depart)} → ${esc(c.arrivee)}<br><span class="byline">${esc(kmTxt(c.km))} km · ${esc(c.categorie)} · ${esc(c.passagers)} pers.${c.cree_par_nom?" · saisie "+esc(c.cree_par_nom):""}</span></td><td>${esc(c.client||"—")}<br><span class="byline">${esc(c.tel||"")}</span></td><td>${esc(c.chauffeur||"—")}</td><td><span class="pill st-${esc(c.statut)}" style="margin:0">${esc(STATUTS[c.statut]||c.statut)}</span>${c.cloture_auto?`<br><span class="byline">automatique</span>`:""}</td><td class="num">${eur(c.prix)}</td><td class="num">${eur(c.commission)}</td><td>${isOpen(c)?"":`<button class="btn sm ghost" data-act="reopen" data-id="${c.id}">Rouvrir</button>`}</td></tr>`).join("")}
     </tbody></table></div>`;
   }
   $("#hist").innerHTML=h;
