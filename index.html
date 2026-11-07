@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#18212f">
 <title>Allo Dispatch</title>
+<meta name="app-version" content="2026-11-07.3">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&display=swap">
@@ -347,6 +348,8 @@ table.grid-edit td:first-child{font-weight:700}
 </main>
 <datalist id="dl-chauffeurs"></datalist>
 <div class="toast" id="toast" hidden></div>
+<div id="upd-bar" hidden style="position:fixed;left:0;right:0;bottom:0;z-index:30;background:var(--accent);color:var(--accent-ink);padding:10px max(16px,env(safe-area-inset-left,0px)) calc(10px + env(safe-area-inset-bottom,0px));display:flex;gap:12px;align-items:center;justify-content:center;flex-wrap:wrap;font-weight:700">
+  Nouvelle version d'Allo Dispatch disponible.<button class="btn sm" type="button" onclick="location.reload()">Recharger maintenant</button></div>
 
 <script>
 /* ===== Configuration ===== */
@@ -430,6 +433,7 @@ function calcTarifFull(o){
   if(bagSup) d+=` + ${o.bags} bagage(s) ${eur(bagSup)}`;
   if(g.supp) d+=` + véhicule ${eur(g.supp)}`;
   d+= brut<g.mini ? ` = ${eur(brut)} → minimum ${o.cat} ${eur(g.mini)}` : ` = ${eur(brut)}`;
+  if(isNaN(prix)) return null;
   return {prix, letter:L, detail:d};
 }
 function calcTarif(cat,km,att){ const r=calcTarifFull({cat,km,att,mode:"auto-vide",type:"immediat"}); return r?r.prix:null; }
@@ -452,17 +456,16 @@ function palierTxt(p){
 function catForPax(n){ for(const c of CATS){ if(n<=cfg.grille[c].places) return c; } return "Van"; }
 
 /* ===== WhatsApp ===== */
+function netChauffeur(c){ return (c.prix!=null && c.commission!=null && !isNaN(c.prix) && !isNaN(c.commission)) ? Math.round((c.prix-c.commission)*100)/100 : null; }
 function waText(c){
-  const L=[];
-  if(c.type==="resa"){
-    L.push("📅 *RÉSERVATION*");
-    L.push("🕐 *"+new Date(c.quand).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})+" à "+hhmm(c.quand)+"*");
-  } else L.push("🚕 *COURSE IMMÉDIATE*");
-  L.push("","📍 *DÉPART*",c.depart,"","🏁 *ARRIVÉE*",c.arrivee,"");
-  L.push("🛣️ *"+kmTxt(c.km)+" km*"+(c.duree?"   ⏱️ *"+c.duree+" min*":""));
-  L.push("🚘 "+c.categorie+"   👥 "+c.passagers+" pers."+(c.bagages?"   🧳 "+c.bagages+" bag.":""));
-  if(c.note) L.push("","📝 "+c.note);
-  L.push("","💶 *TARIF : "+eur(c.prix)+"*","💼 Commission : "+eur(c.commission),"","✅ Répondez *OK* + délai d'approche");
+  const net=netChauffeur(c), L=[];
+  L.push("🟨🟨 *"+c.depart+"*");
+  if(c.type==="resa") L.push("📅 *RÉSA · "+new Date(c.quand).toLocaleDateString("fr-FR",{weekday:"long",day:"numeric",month:"long"})+" à "+hhmm(c.quand)+"*");
+  else L.push("🚕 *IMMÉDIAT*");
+  L.push("","🏁 "+c.arrivee);
+  L.push("🛣️ "+kmTxt(c.km)+" km"+(c.duree?" · "+c.duree+" min":"")+" · "+c.categorie+" · "+c.passagers+" pers."+(c.bagages?" · "+c.bagages+" bag.":""));
+  if(c.note) L.push("📝 "+c.note);
+  L.push("","💶 *NET CHAUFFEUR : "+(net!=null?eur(net):"à confirmer")+"*","","✅ Répondez *OK* + délai d'approche");
   return L.join("\n");
 }
 const waLink = c => "https://api.whatsapp.com/send?text="+encodeURIComponent(waText(c));
@@ -621,6 +624,7 @@ $("#f").addEventListener("submit", async e=>{
   const depTxt = dep.txt || $("#f-dep").value.trim(), arrTxt = arr.txt || $("#f-arr").value.trim();
   if(!depTxt||!arrTxt){ toast("Choisis le départ et la destination."); return; }
   if(!(r.km>0)){ toast("Distance manquante : attends le calcul ou saisis les km."); return; }
+  if(r.prix==null || isNaN(r.prix)){ toast("Tarif non calculé : recharge la page (Ctrl+Maj+R) ou saisis un tarif forcé."); return; }
   const isResa = tab==="reservations";
   let quand = Date.now();
   if(isResa){ quand = resaDate(); if(!quand){ toast("Indique la date et l'heure de la réservation."); return; } }
@@ -959,6 +963,27 @@ async function boot(session){
   await Promise.all([loadCourses(), loadMembres(), loadChauffeurs()]);
   subscribe();
 }
+/* ===== Mise à jour automatique ===== */
+const APP_VERSION = document.querySelector('meta[name="app-version"]').content;
+function formIdle(){
+  const busy = (dep.txt||$("#f-dep").value||arr.txt||$("#f-arr").value||$("#f-nom").value||$("#f-tel").value);
+  const typing = document.activeElement && ["INPUT","TEXTAREA","SELECT"].includes(document.activeElement.tagName);
+  return !busy && !typing && $("#saved").hidden;
+}
+async function checkVersion(){
+  if(!location.protocol.startsWith("http")) return;
+  try{
+    const t = await fetch(location.pathname+"?v="+Date.now(),{cache:"no-store"}).then(r=>r.text());
+    const m = t.match(/name="app-version" content="([^"]+)"/);
+    if(m && m[1]!==APP_VERSION){
+      if(formIdle()) location.reload(); else $("#upd-bar").hidden=false;
+    }
+  }catch(e){}
+}
+setInterval(checkVersion, 60000);
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) checkVersion(); });
+setInterval(()=>{ if(!$("#upd-bar").hidden && formIdle()) location.reload(); }, 15000);
+
 sb.auth.getSession().then(({data})=>boot(data.session));
 sb.auth.onAuthStateChange((ev,session)=>{ if(ev==="SIGNED_IN") boot(session); if(ev==="SIGNED_OUT") location.reload(); });
 </script>
