@@ -224,10 +224,20 @@ table.grid-edit td:first-child{font-weight:700}
           <label for="f-min">Durée (min)<input id="f-min" type="number" inputmode="numeric" min="0" step="1"></label>
           <label for="f-att">Attente (min)<input id="f-att" type="number" inputmode="numeric" min="0" step="1" value="0"></label>
         </div>
-        <div class="row">
+        <div class="row three">
           <label for="f-pax">Personnes<input id="f-pax" type="number" inputmode="numeric" min="1" max="8" value="1"></label>
+          <label for="f-bag">Bagages encombr.<input id="f-bag" type="number" inputmode="numeric" min="0" max="20" value="0"></label>
           <label for="f-cat">Véhicule<select id="f-cat"></select></label>
         </div>
+        <label for="f-tarif">Tarif compteur
+          <select id="f-tarif">
+            <option value="auto-vide">Auto · retour à vide (C le jour, D la nuit)</option>
+            <option value="auto-charge">Auto · retour en charge (A le jour, B la nuit)</option>
+            <option value="A">A · jour, retour en charge</option>
+            <option value="B">B · nuit / dimanche / férié, retour en charge</option>
+            <option value="C">C · jour, retour à vide</option>
+            <option value="D">D · nuit / dimanche / férié, retour à vide</option>
+          </select></label>
         <div class="row">
           <label for="f-nom">Nom du client<input id="f-nom" placeholder="Ex. M. Durand"></label>
           <label for="f-tel">Téléphone client<input id="f-tel" type="tel" inputmode="tel" placeholder="06 12 34 56 78"></label>
@@ -285,8 +295,13 @@ table.grid-edit td:first-child{font-weight:700}
     </div>
     <div class="panel">
       <h2>Grille tarifaire</h2>
-      <p class="hint">Tarif = prise en charge + km × €/km + minutes d'attente × €/min, avec le minimum de la catégorie.</p>
-      <div class="tbl-wrap"><table class="grid-edit"><thead><tr><th>Catégorie</th><th>Places max</th><th>Prise en charge (€)</th><th>€/km</th><th>€/min attente</th><th>Minimum (€)</th></tr></thead><tbody id="g-body"></tbody></table></div>
+      <p class="hint">Grille officielle des taxis du Rhône (arrêté préfectoral 2026), la même que TL et Taxi Lyon. Tarif = prise en charge + km × prix du tarif A/B/C/D + attente + suppléments, avec le minimum de la catégorie. Nuit = 19 h – 7 h, dimanches et jours fériés.</p>
+      <div class="tbl-wrap"><table class="grid-edit" style="min-width:640px"><thead><tr><th>Prise en charge (€)</th><th>Tarif A €/km</th><th>Tarif B €/km</th><th>Tarif C €/km</th><th>Tarif D €/km</th><th>Heure d'attente (€)</th></tr></thead>
+        <tbody><tr><td><input id="t-pc" type="number" step="0.01" min="0"></td><td><input id="t-A" type="number" step="0.01" min="0"></td><td><input id="t-B" type="number" step="0.01" min="0"></td><td><input id="t-C" type="number" step="0.01" min="0"></td><td><input id="t-D" type="number" step="0.01" min="0"></td><td><input id="t-heure" type="number" step="0.01" min="0"></td></tr></tbody></table></div>
+      <div class="tbl-wrap" style="margin-top:10px"><table class="grid-edit" style="min-width:560px"><thead><tr><th>Réservation immédiate (€)</th><th>Réservation à l'avance (€)</th><th>Par passager dès le 5ᵉ (€)</th><th>Par bagage encombrant (€)</th></tr></thead>
+        <tbody><tr><td><input id="t-imm" type="number" step="0.01" min="0"></td><td><input id="t-av" type="number" step="0.01" min="0"></td><td><input id="t-pax" type="number" step="0.01" min="0"></td><td><input id="t-bag" type="number" step="0.01" min="0"></td></tr></tbody></table></div>
+      <h3>Par véhicule</h3>
+      <div class="tbl-wrap"><table class="grid-edit" style="min-width:420px"><thead><tr><th>Catégorie</th><th>Places max</th><th>Minimum (€)</th><th>Supplément véhicule (€)</th></tr></thead><tbody id="g-body"></tbody></table></div>
       <h3>Commission par palier de tarif</h3>
       <p class="hint">Pour chaque tranche de prix, un montant fixe en € ou un pourcentage. Laisse « Jusqu'à » vide sur la dernière ligne pour « au-delà ».</p>
       <div class="tbl-wrap"><table class="grid-edit" style="min-width:420px"><thead><tr><th>Tarif jusqu'à (€)</th><th>Commission</th><th>Type</th><th></th></tr></thead><tbody id="p-body"></tbody></table></div>
@@ -338,9 +353,10 @@ const SUPABASE_URL = "https://bivarmjaijctxsgbssni.supabase.co";
 const SUPABASE_KEY = "sb_publishable_QjnTrQ1mIrh8pNz55_YvoQ_D7SSV0vc";
 
 const DEF = { grille: {
-  Berline:{places:4,pc:12.5,km:1.8,min:0.10,mini:25},
-  XL:{places:5,pc:17,km:2.2,min:0.10,mini:30},
-  Van:{places:8,pc:25,km:2.8,min:0.10,mini:45} }, commission:20,
+  Berline:{places:4,mini:25,supp:0},
+  XL:{places:5,mini:30,supp:0},
+  Van:{places:8,mini:45,supp:0} }, commission:20,
+  taxi: {pc:3.10, A:1.00, B:1.50, C:2.00, D:3.00, heure:41.30, imm:2, av:4, pax:4, bag:2},
   paliers: [
     {max:29.99, val:5,  mode:"eur"},
     {max:44.99, val:8,  mode:"eur"},
@@ -383,8 +399,39 @@ function toast(msg){const t=$("#toast");t.textContent=msg;t.hidden=false;clearTi
 function show(view){ ["#view-login","#view-denied","#app"].forEach(s=>$(s).hidden = s!==view); $("#tabs").hidden = view!=="#app"; $("#who").hidden = view==="#view-login"; }
 
 /* ===== Tarif ===== */
-function calcTarif(cat,km,att){ const g=cfg.grille[cat]; if(!g||!(km>0)) return null;
-  return Math.round(Math.max(g.pc+km*g.km+(att||0)*g.min, g.mini)*100)/100; }
+function paques(y){const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1;return new Date(y,mo-1,da);}
+function estFerie(dt){
+  const y=dt.getFullYear(), k=pad(dt.getMonth()+1)+"-"+pad(dt.getDate());
+  if(["01-01","05-01","05-08","07-14","08-15","11-01","11-11","12-25"].includes(k)) return true;
+  const p=paques(y); return [1,39,50].some(n=>{ const x=new Date(p); x.setDate(x.getDate()+n); return x.getMonth()===dt.getMonth()&&x.getDate()===dt.getDate(); });
+}
+function periode(when){
+  const d=new Date(when||Date.now()), h=d.getHours();
+  if(estFerie(d)) return {nuit:true, txt:"jour férié"};
+  if(d.getDay()===0) return {nuit:true, txt:"dimanche"};
+  if(h<7||h>=19) return {nuit:true, txt:"nuit"};
+  return {nuit:false, txt:"jour"};
+}
+function calcTarifFull(o){
+  const g=cfg.grille[o.cat], t=cfg.taxi; if(!g||!t||!(o.km>0)) return null;
+  const p=periode(o.when);
+  let L=o.mode;
+  if(!["A","B","C","D"].includes(L)) L = o.mode==="auto-charge" ? (p.nuit?"B":"A") : (p.nuit?"D":"C");
+  const rate=t[L]||0, resa=o.type==="resa"?t.av:t.imm, paxSup=Math.max(0,(o.pax||1)-4)*t.pax, bagSup=(o.bags||0)*t.bag;
+  const attente=(o.att||0)*t.heure/60;
+  const brut=t.pc + o.km*rate + attente + resa + paxSup + bagSup + (g.supp||0);
+  const prix=Math.round(Math.max(brut, g.mini)*100)/100;
+  const lib={A:"jour, retour en charge",B:"nuit, retour en charge",C:"jour, retour à vide",D:"nuit, retour à vide"}[L];
+  let d=`Tarif ${L} (${lib}${["B","D"].includes(L)&&p.nuit&&p.txt!=="nuit"?" · "+p.txt:""}) : ${eur(t.pc)} + ${kmTxt(o.km)} km × ${eur(rate)}`;
+  if(attente) d+=` + ${o.att} min d'attente`;
+  d+=` + réservation ${eur(resa)}`;
+  if(paxSup) d+=` + ${o.pax-4} passager(s) ${eur(paxSup)}`;
+  if(bagSup) d+=` + ${o.bags} bagage(s) ${eur(bagSup)}`;
+  if(g.supp) d+=` + véhicule ${eur(g.supp)}`;
+  d+= brut<g.mini ? ` = ${eur(brut)} → minimum ${o.cat} ${eur(g.mini)}` : ` = ${eur(brut)}`;
+  return {prix, letter:L, detail:d};
+}
+function calcTarif(cat,km,att){ const r=calcTarifFull({cat,km,att,mode:"auto-vide",type:"immediat"}); return r?r.prix:null; }
 function palierFor(p){
   const ps = (cfg.paliers||[]).slice().sort((a,b)=>(a.max==null)-(b.max==null) || a.max-b.max);
   return ps.find(t=>t.max==null || p<=t.max) || null;
@@ -412,7 +459,7 @@ function waText(c){
   } else L.push("🚕 *COURSE IMMÉDIATE*");
   L.push("","📍 *DÉPART*",c.depart,"","🏁 *ARRIVÉE*",c.arrivee,"");
   L.push("🛣️ *"+kmTxt(c.km)+" km*"+(c.duree?"   ⏱️ *"+c.duree+" min*":""));
-  L.push("🚘 "+c.categorie+"   👥 "+c.passagers+" pers.");
+  L.push("🚘 "+c.categorie+"   👥 "+c.passagers+" pers."+(c.bagages?"   🧳 "+c.bagages+" bag.":""));
   if(c.note) L.push("","📝 "+c.note);
   L.push("","💶 *TARIF : "+eur(c.prix)+"*","💼 Commission : "+eur(c.commission),"","✅ Répondez *OK* + délai d'approche");
   return L.join("\n");
@@ -435,7 +482,7 @@ function waTextChauffeur(c){
   L.push("","📍 *DÉPART*",c.depart,"","🏁 *ARRIVÉE*",c.arrivee,"");
   L.push("👤 *CLIENT* : "+(c.client||"—"));
   if(c.tel) L.push("📞 *"+c.tel+"*");
-  L.push("","🛣️ "+kmTxt(c.km)+" km"+(c.duree?"   ⏱️ "+c.duree+" min":""),"🚘 "+c.categorie+"   👥 "+c.passagers+" pers.");
+  L.push("","🛣️ "+kmTxt(c.km)+" km"+(c.duree?"   ⏱️ "+c.duree+" min":""),"🚘 "+c.categorie+"   👥 "+c.passagers+" pers."+(c.bagages?"   🧳 "+c.bagages+" bag.":""));
   if(c.note) L.push("","📝 "+c.note);
   L.push("","💶 *TARIF : "+eur(c.prix)+"*","💼 Commission : "+eur(c.commission),"","Merci d'appeler le client à ton arrivée 👍");
   return L.join("\n");
@@ -531,20 +578,20 @@ function resaDate(){
 }
 function readForm(){
   const km=parseFloat(($("#f-km").value||"").replace(",",".")), duree=parseInt($("#f-min").value)||0, att=parseInt($("#f-att").value)||0;
-  const pax=Math.max(1,parseInt($("#f-pax").value)||1), cat=$("#f-cat").value||"Berline";
-  const calc=calcTarif(cat,km,att), forced=parseFloat(($("#f-prix").value||"").replace(",","."));
+  const pax=Math.max(1,parseInt($("#f-pax").value)||1), cat=$("#f-cat").value||"Berline", bags=Math.max(0,parseInt($("#f-bag").value)||0);
+  const isR = tab==="reservations", when = isR ? (resaDate()||Date.now()) : Date.now();
+  const ct=calcTarifFull({cat,km,att,pax,bags,when,mode:$("#f-tarif").value,type:isR?"resa":"immediat"});
+  const calc=ct?ct.prix:null, forced=parseFloat(($("#f-prix").value||"").replace(",","."));
   const prix = forced>0 ? Math.round(forced*100)/100 : calc;
   const comCalc = calcCom(prix), comF = parseFloat(($("#f-com").value||"").replace(",","."));
   const com = comF>=0 && $("#f-com").value!=="" ? Math.round(comF*100)/100 : comCalc;
-  return {km,duree,att,pax,cat,calc,prix,forced:forced>0,com,comCalc,comForced:com!==comCalc};
+  return {km,duree,att,pax,bags,cat,calc,ct,prix,forced:forced>0,com,comCalc,comForced:com!==comCalc};
 }
 function updateMeter(){
   const r=readForm(), g=cfg.grille[r.cat];
   $("#m-prix").textContent=eur(r.prix); $("#m-com").textContent=eur(r.com); $("#m-dur").textContent=r.duree?r.duree+" min":"—";
-  if(r.km>0&&g){
-    let t=`${r.cat} : ${eur(g.pc)} + ${kmTxt(r.km)} km × ${eur(g.km)}`;
-    if(r.att) t+=` + ${r.att} min × ${eur(g.min)}`;
-    t+=` (minimum ${eur(g.mini)})`;
+  if(r.km>0&&g&&r.ct){
+    let t=r.ct.detail;
     if(r.forced) t+=` · tarif forcé (calculé : ${eur(r.calc)})`;
     t+= r.comForced ? ` · commission forcée (calculée : ${eur(r.comCalc)})` : ` · ${palierTxt(r.prix)}`;
     $("#m-formula").textContent=t;
@@ -554,7 +601,7 @@ function updateMeter(){
 }
 function setDefaultDate(){ const d=new Date(Date.now()+3600000); $("#f-date").value=dayKey(d.getTime()); $("#f-heure").value=pad(d.getHours())+":00"; }
 function resetForm(){
-  $("#f").reset(); $("#f-att").value=0; $("#f-pax").value=1; $("#f-cat").value="Berline"; catTouched=false;
+  $("#f").reset(); $("#f-att").value=0; $("#f-pax").value=1; $("#f-bag").value=0; $("#f-cat").value="Berline"; catTouched=false;
   dep={txt:"",loc:null}; arr={txt:"",loc:null}; routeOpts=[]; $("#pick-dep").textContent=""; $("#pick-arr").textContent=""; setRouteState("");
   setDefaultDate(); if(mapsReady) buildAutocomplete(); updateMeter();
 }
@@ -565,7 +612,7 @@ $("#f").addEventListener("input", e=>{
   updateMeter();
 });
 $("#f-cat").addEventListener("change", ()=>{catTouched=true;updateMeter();});
-["#f-date","#f-heure"].forEach(s=>$(s).addEventListener("change", ()=>{ if(dep.loc&&arr.loc) computeRoute(); }));
+["#f-date","#f-heure"].forEach(s=>$(s).addEventListener("change", ()=>{ updateMeter(); if(dep.loc&&arr.loc) computeRoute(); }));
 $("#f-reset").addEventListener("click", resetForm);
 $("#f").addEventListener("submit", async e=>{
   e.preventDefault();
@@ -577,7 +624,7 @@ $("#f").addEventListener("submit", async e=>{
   let quand = Date.now();
   if(isResa){ quand = resaDate(); if(!quand){ toast("Indique la date et l'heure de la réservation."); return; } }
   const row = { type:isResa?"resa":"immediat", statut:"attente", depart:depTxt, arrivee:arrTxt, km:r.km, duree:r.duree, attente:r.att,
-    passagers:r.pax, categorie:r.cat, client:$("#f-nom").value.trim(), tel:$("#f-tel").value.trim(), note:$("#f-note").value.trim(),
+    passagers:r.pax, bagages:r.bags, tarif:r.forced?"forcé":(r.ct?r.ct.letter:""), categorie:r.cat, client:$("#f-nom").value.trim(), tel:$("#f-tel").value.trim(), note:$("#f-note").value.trim(),
     prix:r.prix, commission:r.com, prix_force:r.forced, quand:new Date(quand).toISOString(), cree_par_nom: me.nom||"" };
   const btn=$("#f-save"); btn.disabled=true;
   const {data, error} = await sb.from("courses").insert(row).select().single();
@@ -605,7 +652,8 @@ async function loadCourses(){
 async function loadConfig(){
   const {data} = await sb.from("config").select("*");
   for(const row of data||[]){
-    if(row.id==="tarifs" && row.data && row.data.grille){ cfg = {grille:Object.assign(JSON.parse(JSON.stringify(DEF.grille)), row.data.grille), commission: row.data.commission ?? DEF.commission, paliers: Array.isArray(row.data.paliers) ? row.data.paliers : JSON.parse(JSON.stringify(DEF.paliers))}; }
+    if(row.id==="tarifs" && row.data && row.data.grille){ const gr={}; for(const c of CATS) gr[c]=Object.assign({}, DEF.grille[c], (row.data.grille||{})[c]||{});
+      cfg = {grille:gr, taxi:Object.assign({}, DEF.taxi, row.data.taxi||{}), commission: row.data.commission ?? DEF.commission, paliers: Array.isArray(row.data.paliers) ? row.data.paliers : JSON.parse(JSON.stringify(DEF.paliers))}; }
     if(row.id==="google" && row.data){ googleKey = row.data.key || ""; }
   }
   fillCats(); renderGrid(); $("#k-google").value = googleKey; updateMeter();
@@ -795,7 +843,8 @@ $("#n-on").addEventListener("click", async ()=>{ if("Notification" in window){ a
 
 /* ===== Réglages ===== */
 function renderGrid(){
-  $("#g-body").innerHTML=CATS.map(c=>{ const g=cfg.grille[c]; return `<tr><td>${c}</td>${["places","pc","km","min","mini"].map(k=>`<td><input id="g-${c}-${k}" type="number" step="${k==="places"?1:0.01}" min="0" value="${g[k]}"></td>`).join("")}</tr>`; }).join("");
+  $("#g-body").innerHTML=CATS.map(c=>{ const g=cfg.grille[c]; return `<tr><td>${c}</td>${["places","mini","supp"].map(k=>`<td><input id="g-${c}-${k}" type="number" step="${k==="places"?1:0.01}" min="0" value="${g[k]??0}"></td>`).join("")}</tr>`; }).join("");
+  for(const k of ["pc","A","B","C","D","heure","imm","av","pax","bag"]) $("#t-"+k).value = cfg.taxi[k];
   $("#g-com").value=cfg.commission;
   renderPaliers();
 }
@@ -813,7 +862,8 @@ $("#p-add").addEventListener("click",()=>{ cfg.paliers=readPaliers(); cfg.palier
 document.addEventListener("click",e=>{ const b=e.target.closest("[data-p-del]"); if(!b) return; const ps=readPaliers(); ps.splice(Number(b.dataset.pDel),1); cfg.paliers=ps; renderPaliers(); });
 $("#g-save").addEventListener("click", async ()=>{
   const next={grille:{},commission:parseFloat($("#g-com").value)||20,paliers:readPaliers()};
-  for(const c of CATS){ next.grille[c]={}; for(const k of ["places","pc","km","min","mini"]) next.grille[c][k]=parseFloat($(`#g-${c}-${k}`).value)||0; }
+  for(const c of CATS){ next.grille[c]={}; for(const k of ["places","mini","supp"]) next.grille[c][k]=parseFloat($(`#g-${c}-${k}`).value)||0; }
+  next.taxi={}; for(const k of ["pc","A","B","C","D","heure","imm","av","pax","bag"]) next.taxi[k]=parseFloat($("#t-"+k).value)||0;
   const {error}=await sb.from("config").upsert({id:"tarifs",data:next});
   if(error) toast("Enregistrement impossible : "+error.message); else { cfg=next; fillCats(); updateMeter(); toast("Tarifs enregistrés pour toute l'équipe."); }
 });
@@ -862,7 +912,7 @@ document.addEventListener("click", async e=>{
 });
 
 /* ===== Onglets ===== */
-function setTab(t){ tab=t; try{history.replaceState(null,"","#"+t)}catch(e){} $("#saved").hidden=true; $("#f").hidden=false; render(); }
+function setTab(t){ tab=t; try{history.replaceState(null,"","#"+t)}catch(e){} $("#saved").hidden=true; $("#f").hidden=false; render(); updateMeter(); }
 document.querySelectorAll("nav.tabs button").forEach(b=>b.addEventListener("click",()=>setTab(b.dataset.tab)));
 
 /* ===== Connexion ===== */
